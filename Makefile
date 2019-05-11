@@ -78,10 +78,12 @@ FIRMWARE_LIB_SRC := \
 
 HYPERKIT_SRC := src/hyperkit.c
 
+CFLAGS += -Icontrib/lib9p -Wno-unused-function
+
 HAVE_OCAML_QCOW := $(shell if ocamlfind query qcow prometheus-app uri logs logs.fmt mirage-unix >/dev/null 2>/dev/null ; then echo YES ; else echo NO; fi)
 
 ifeq ($(HAVE_OCAML_QCOW),YES)
-CFLAGS += -DHAVE_OCAML=1 -DHAVE_OCAML_QCOW=1 -DHAVE_OCAML=1
+CFLAGS += -DHAVE_OCAML=1 -DHAVE_OCAML_QCOW=1 -DHAVE_OCAML=1 
 
 LIBEV_FILE=/usr/local/lib/libev.a
 LIBEV=$(shell if test -e $(LIBEV_FILE) ; then echo $(LIBEV_FILE) ; fi )
@@ -138,6 +140,9 @@ DEP := $(OBJ:%.o=%.d)
 INC := -Isrc/include
 
 CFLAGS += -DVERSION=\"$(GIT_VERSION)\" -DVERSION_SHA1=\"$(GIT_VERSION_SHA1)\"
+
+LDFLAGS += -Lcontrib/lib9p/build
+LDLIBS += contrib/lib9p/build/lib9p.a
 
 TARGET = build/hyperkit
 
