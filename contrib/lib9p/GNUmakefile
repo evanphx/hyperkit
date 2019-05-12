@@ -26,8 +26,8 @@ endif
 
 CFLAGS := $(WFLAGS) \
 	-g \
-	-O0 \
-	-DL9P_DEBUG=L9P_DEBUG
+	-O3
+#	-DL9P_DEBUG=L9P_DEBUG
 # Note: to turn on debug, use -DL9P_DEBUG=L9P_DEBUG,
 # and set env variable LIB9P_LOGGING to stderr or to
 # the (preferably full path name of) the debug log file.
@@ -56,7 +56,9 @@ LIB := lib9p.dylib
 LIBA := lib9p.a
 SERVER := server
 
-all: build $(LIB) $(SERVER)
+all: build $(LIB) $(LIBA) $(SERVER)
+
+static: build $(LIBA)
 
 $(LIBA): $(LIB_OBJS)
 	ar -rc build/$@ $^

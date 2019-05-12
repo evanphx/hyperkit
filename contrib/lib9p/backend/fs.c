@@ -710,14 +710,17 @@ generate_qid(struct stat *buf, struct l9p_qid *qid)
  * we don't bother retrying either.
  */
 static void
-fillacl(struct fs_fid *ff)
+fillacl(struct fs_fid *ff __unused)
 {
+  return;
 
+#if 0
 	if (ff->ff_acl == NULL && (ff->ff_flags & FF_NO_NFSV4_ACL) == 0) {
 		ff->ff_acl = look_for_nfsv4_acl(ff, ff->ff_fd, ff->ff_name);
 		if (ff->ff_acl == NULL)
 			ff->ff_flags |= FF_NO_NFSV4_ACL;
 	}
+#endif
 }
 
 /*
@@ -2677,16 +2680,28 @@ fs_readdir(void *softc __unused, struct l9p_request *req)
 		 * yet.)
 		 */
 
-		/*
-		 * TODO: we do a full lstat here; could use dp->d_*
-		 * to construct the qid more efficiently, as long
-		 * as dp->d_type != DT_UNKNOWN.
-		 */
-		if (fs_lstatat(file, dp->d_name, &st))
-			continue;
+		de.qid.path = dp->d_ino;
+		de.qid.version = 0;
 
-		de.qid.type = 0;
-		generate_qid(&st, &de.qid);
+		switch(dp->d_type) {
+		case DT_REG:
+		  de.qid.type |= L9P_QTFILE;
+		  break;
+		case DT_DIR:
+		  de.qid.type |= L9P_QTDIR;
+		  break;
+		case DT_LNK:
+		  de.qid.type |= L9P_QTSYMLINK;
+		  break;
+		case DT_UNKNOWN:
+		  if (fs_lstatat(file, dp->d_name, &st))
+			  continue;
+
+		  de.qid.type = 0;
+		  generate_qid(&st, &de.qid);
+		  break;
+		}
+
 		de.offset = (uint64_t)telldir(file->ff_dir);
 		de.type = dp->d_type;
 		de.name = dp->d_name;
