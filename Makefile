@@ -107,7 +107,7 @@ OCAML_C_SRC := \
 	src/lib/mirage_block_c.c
 
 OCAML_WHERE := $(shell ocamlc -where)
-OCAML_PACKS := cstruct cstruct.lwt io-page io-page.unix uri mirage-block \
+OCAML_PACKS := cstruct io-page io-page.unix uri mirage-block \
 	mirage-block-unix qcow unix threads lwt lwt.unix logs logs.fmt   \
 	mirage-unix prometheus-app conduit-lwt cohttp.lwt
 OCAML_LDLIBS := -L $(OCAML_WHERE) \
