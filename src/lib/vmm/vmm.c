@@ -506,7 +506,7 @@ vm_mem_allocated(struct vm *vm, uint64_t gpa)
 }
 
 int
-vm_malloc(struct vm *vm, uint64_t gpa, size_t len)
+vm_malloc(struct vm *vm, uint64_t gpa, size_t len, uint64_t prot)
 {
 	int available, allocated;
 	struct mem_seg *seg;
@@ -546,7 +546,7 @@ vm_malloc(struct vm *vm, uint64_t gpa, size_t len)
 
 	seg = &vm->mem_segs[vm->num_mem_segs];
 
-	if ((object = vmm_mem_alloc(gpa, len)) == NULL)
+	if ((object = vmm_mem_alloc(gpa, len, prot)) == NULL)
 		return (ENOMEM);
 
 	seg->gpa = gpa;

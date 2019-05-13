@@ -1,11 +1,8 @@
 #pragma once
 
-#include <assert.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #define UNUSED __attribute__ ((unused))
 #define CTASSERT(x) _Static_assert ((x), "CTASSERT")
@@ -64,33 +61,6 @@ static inline void do_cpuid(unsigned ax, unsigned *p) {
 	__asm__ __volatile__ ("cpuid"
 		: "=a" (p[0]), "=b" (p[1]), "=c" (p[2]), "=d" (p[3])
 		:  "0" (ax));
-}
-
-/* Used to trigger a self-shutdown */
-extern void push_power_button(void);
-
-/* Error checking pthread mutex operations */
-static inline void xpthread_mutex_init(pthread_mutex_t *mutex)
-{
-	int rc = pthread_mutex_init(mutex, NULL);
-	if (__builtin_expect(rc != 0, 0))
-		xhyve_abort("pthread_mutex_init failed: %d: %s\n",
-			    rc, strerror(rc));
-}
-
-static inline void xpthread_mutex_lock(pthread_mutex_t *mutex)
-{
-	int rc = pthread_mutex_lock(mutex);
-	if (__builtin_expect(rc != 0, 0))
-		xhyve_abort("pthread_mutex_lock failed: %d: %s\n",
-			    rc, strerror(rc));
-}
-static inline void xpthread_mutex_unlock(pthread_mutex_t *mutex)
-{
-	int rc = pthread_mutex_unlock(mutex);
-	if (__builtin_expect(rc != 0, 0))
-		xhyve_abort("pthread_mutex_unlock failed: %d: %s\n",
-			    rc, strerror(rc));
 }
 
 /*

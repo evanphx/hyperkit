@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2011 NetApp, Inc.
+ * Copyright (c) 2015 Tycho Nightingale <tycho.nightingale@pluribusnetworks.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,10 +11,10 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY NETAPP, INC ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL NETAPP, INC OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -26,15 +26,28 @@
  * $FreeBSD$
  */
 
-#pragma once
+#ifndef _CONSOLE_H_
+#define	_CONSOLE_H_
 
-#include <stdint.h>
-#include <stdlib.h>
+struct bhyvegc;
 
-struct vmspace;
+typedef void (*fb_render_func_t)(struct bhyvegc *gc, void *arg);
+typedef void (*kbd_event_func_t)(int down, uint32_t keysym, void *arg);
+typedef void (*ptr_event_func_t)(uint8_t mask, int x, int y, void *arg);
 
-int	vmm_mem_init(void);
-void *vmm_mem_alloc(uint64_t gpa, size_t size, uint64_t prot);
-void vmm_mem_free(uint64_t gpa, size_t size, void *object);
-void vmm_mem_protect(uint64_t gpa, size_t size);
-void vmm_mem_unprotect(uint64_t gpa, size_t size);
+void	console_init(uint16_t w, uint16_t h, void *fbaddr);
+
+void	console_set_fbaddr(void *fbaddr);
+
+struct bhyvegc_image *console_get_image(void);
+
+void	console_fb_register(fb_render_func_t render_cb, void *arg);
+void	console_refresh(void);
+
+void	console_kbd_register(kbd_event_func_t event_cb, void *arg, int pri);
+void	console_key_event(int down, uint32_t keysym);
+
+void	console_ptr_register(ptr_event_func_t event_cb, void *arg, int pri);
+void	console_ptr_event(uint8_t button, int x, int y);
+
+#endif /* _CONSOLE_H_ */

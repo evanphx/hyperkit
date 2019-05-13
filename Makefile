@@ -38,6 +38,8 @@ HYPERKIT_LIB_SRC := \
 	src/lib/acpitbl.c \
 	src/lib/atkbdc.c \
 	src/lib/block_if.c \
+	src/lib/bhyvegc.c \
+	src/lib/console.c \
 	src/lib/consport.c \
 	src/lib/dbgport.c \
 	src/lib/fwctl.c \
@@ -50,6 +52,7 @@ HYPERKIT_LIB_SRC := \
 	src/lib/mptbl.c \
 	src/lib/pci_ahci.c \
 	src/lib/pci_emul.c \
+	src/lib/pci_fbuf.c \
 	src/lib/pci_hostbridge.c \
 	src/lib/pci_irq.c \
 	src/lib/pci_lpc.c \
@@ -64,10 +67,13 @@ HYPERKIT_LIB_SRC := \
 	src/lib/pm.c \
 	src/lib/post.c \
 	src/lib/rtc.c \
+	src/lib/rfb.c \
 	src/lib/smbiostbl.c \
+	src/lib/sockstream.c \
 	src/lib/task_switch.c \
 	src/lib/uart_emul.c \
 	src/lib/virtio.c \
+	src/lib/vga.c \
 	src/lib/xmsr.c
 
 FIRMWARE_LIB_SRC := \
@@ -80,7 +86,7 @@ HYPERKIT_SRC := src/hyperkit.c
 
 CFLAGS += -Icontrib/lib9p -Wno-unused-function
 
-HAVE_OCAML_QCOW := $(shell if ocamlfind query qcow prometheus-app uri logs logs.fmt mirage-unix >/dev/null 2>/dev/null ; then echo YES ; else echo NO; fi)
+HAVE_OCAML_QCOW := NO # $(shell if ocamlfind query qcow prometheus-app uri logs logs.fmt mirage-unix >/dev/null 2>/dev/null ; then echo YES ; else echo NO; fi)
 
 ifeq ($(HAVE_OCAML_QCOW),YES)
 CFLAGS += -DHAVE_OCAML=1 -DHAVE_OCAML_QCOW=1 -DHAVE_OCAML=1 
@@ -142,7 +148,7 @@ INC := -Isrc/include
 CFLAGS += -DVERSION=\"$(GIT_VERSION)\" -DVERSION_SHA1=\"$(GIT_VERSION_SHA1)\"
 
 LDFLAGS += -Lcontrib/lib9p/build
-LDLIBS += contrib/lib9p/build/lib9p.a
+LDLIBS += contrib/lib9p/build/lib9p.a -lz
 
 TARGET = build/hyperkit
 

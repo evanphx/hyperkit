@@ -1,6 +1,5 @@
 /*-
- * Copyright (c) 2011 NetApp, Inc.
- * Copyright (c) 2015 xhyve developers
+ * Copyright (c) 2015 Nahanni Systems, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,10 +11,10 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY NETAPP, INC ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL NETAPP, INC OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -28,56 +27,61 @@
  */
 
 #include <stdint.h>
-#include <stdlib.h>
-#include <Hypervisor/hv.h>
-#include <Hypervisor/hv_vmx.h>
-#include <xhyve/support/misc.h>
-#include <xhyve/vmm/vmm_mem.h>
 
-int
-vmm_mem_init(void)
+#include <sys/cdefs.h>
+
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <errno.h>
+
+#include <xhyve/sockstream.h>
+
+ssize_t
+stream_read(int fd, void *buf, ssize_t nbytes)
 {
-	return (0);
-}
+	uint8_t *p;
+	ssize_t len = 0;
+	ssize_t n;
 
+	p = buf;
 
-void *
-vmm_mem_alloc(uint64_t gpa, size_t size, uint64_t prot)
-{
-	void *object;
-    hv_memory_flags_t hvProt;
+	while (len < nbytes) {
+		n = read(fd, p + len, (size_t)(nbytes - len));
+		if (n == 0)
+			break;
 
-	object = valloc(size);
-
-	if (!object) {
-		xhyve_abort("vmm_mem_alloc failed\n");
+		if (n < 0) {
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+			return (n);
+		}
+		len += n;
 	}
-
-    hvProt = (prot & XHYVE_PROT_READ) ? HV_MEMORY_READ : 0;
-    hvProt |= (prot & XHYVE_PROT_WRITE) ? HV_MEMORY_WRITE : 0;
-    hvProt |= (prot & XHYVE_PROT_EXECUTE) ? HV_MEMORY_EXEC : 0;
-
-	if (hv_vm_map(object, gpa, size, hvProt))
-	{
-		xhyve_abort("hv_vm_map failed\n");
-	}
-
-	return object;
+	return (len);
 }
 
-void
-vmm_mem_free(uint64_t gpa, size_t size, void *object)
+ssize_t
+stream_write(int fd, const void *buf, ssize_t nbytes)
 {
-	hv_vm_unmap(gpa, size);
-	free(object);
+	const uint8_t *p;
+	ssize_t len = 0;
+	ssize_t n;
+
+	p = buf;
+
+	while (len < nbytes) {
+		n = write(fd, p + len, (size_t)(nbytes - len));
+		if (n == 0)
+			break;
+		if (n < 0) {
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+			return (n);
+		}
+		len += n;
+	}
+	return (len);
 }
 
-void
-vmm_mem_protect(uint64_t gpa, size_t size) {
-	hv_vm_protect(gpa, size, 0);
-}
 
-void
-vmm_mem_unprotect(uint64_t gpa, size_t size) {
-	hv_vm_protect(gpa, size, (HV_MEMORY_READ | HV_MEMORY_WRITE | HV_MEMORY_EXEC));
-}
