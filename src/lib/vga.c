@@ -260,11 +260,11 @@ static uint32_t
 vga_get_text_pixel(struct vga_softc *sc, uint16_t x, uint16_t y)
 {
 	int bit;
-    unsigned int dots, offset, font_offset;
+	unsigned int dots, offset, font_offset;
 	uint8_t ch, attr, font;
 	uint8_t idx;
 
-    assert(sc->vga_seq.seq_cm_dots >= 0);
+	assert(sc->vga_seq.seq_cm_dots >= 0);
 	dots = (unsigned int)sc->vga_seq.seq_cm_dots;
 
 	offset = 2 * sc->vga_crtc.crtc_start_addr;

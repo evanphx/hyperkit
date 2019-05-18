@@ -52,7 +52,6 @@
 #include <xhyve/vmm/intel/vmx_msr.h>
 #include <xhyve/vmm/x86.h>
 #include <xhyve/vmm/intel/vmx_controls.h>
-#include <xhyve/firmware/bootrom.h>
 #include <xhyve/dtrace.h>
 
 #define PROCBASED_CTLS_WINDOW_SETTING \
@@ -2075,7 +2074,6 @@ vmx_exit_process(struct vmx *vmx, int vcpu, struct vm_exit *vmexit)
 		gpa = vmcs_gpa(vcpu);
 		HYPERKIT_VMX_EPT_FAULT(vcpu, gpa, qual);
 		if (vm_mem_allocated(vmx->vm, gpa) ||
-		    bootrom_contains_gpa(gpa) ||
 		    apic_access_fault(vmx, vcpu, gpa)) {
 			vmexit->exitcode = VM_EXITCODE_PAGING;
 			vmexit->inst_length = 0;

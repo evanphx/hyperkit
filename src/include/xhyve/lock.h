@@ -1,7 +1,5 @@
 /*-
- * Copyright (c) 2014 Hudson River Trading LLC
- * Written by: John H. Baldwin <jhb@FreeBSD.org>
- * Copyright (c) 2015 xhyve developers
+ * Copyright (c) 2016 xhyve developers
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -13,7 +11,7 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
@@ -26,49 +24,18 @@
  * SUCH DAMAGE.
  */
 
-#include <xhyve/vmm/vmm_api.h>
-#include <xhyve/ioapic.h>
-#include <xhyve/pci_emul.h>
-#include <xhyve/pci_lpc.h>
+#include <Availability.h>
 
-/*
- * Assign PCI INTx interrupts to I/O APIC pins in a round-robin
- * fashion.  Note that we have no idea what the HPET is using, but the
- * HPET is also programmable whereas this is intended for hardwired
- * PCI interrupts.
- *
- * This assumes a single I/O APIC where pins >= 16 are permitted for
- * PCI devices.
- */
-static int pci_pins;
-
-void
-ioapic_init(void)
-{
-
-	if (xh_vm_ioapic_pincount(&pci_pins) < 0) {
-		pci_pins = 0;
-		return;
-	}
-
-	/* Ignore the first 16 pins. */
-	if (pci_pins <= 16) {
-		pci_pins = 0;
-		return;
-	}
-	pci_pins -= 16;
-}
-
-int
-ioapic_pci_alloc_irq(struct pci_devinst *pi)
-{
-	static int last_pin;
-
-	if (pci_pins == 0)
-		return (-1);
-  if (lpc_bootrom()) {
-        /* For external bootrom use fixed mapping. */
-        return (16 + (4 + pi->pi_slot + pi->pi_lintr.pin) % 8);
-  }
-	return (16 + (last_pin++ % pci_pins));
-}
+#if defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200 /* __MAC_10_12 */
+	#include <os/lock.h>
+	#define xhyve_lock_t os_unfair_lock
+	#define XHYVE_LOCK_INIT(V, LOCK) (V)->LOCK = OS_UNFAIR_LOCK_INIT;
+	#define XHYVE_LOCK(V, LOCK) os_unfair_lock_lock(&(V)->LOCK)
+	#define XHYVE_UNLOCK(V, LOCK) os_unfair_lock_unlock(&(V)->LOCK)
+#else
+	#include <libkern/OSAtomic.h>
+	#define xhyve_lock_t OSSpinLock
+	#define XHYVE_LOCK_INIT(V, LOCK) (V)->LOCK = OS_SPINLOCK_INIT;
+	#define XHYVE_LOCK(V, LOCK) OSSpinLockLock(&(V)->LOCK)
+	#define XHYVE_UNLOCK(V, LOCK) OSSpinLockUnlock(&(V)->LOCK)
+#endif

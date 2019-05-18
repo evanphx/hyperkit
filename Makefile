@@ -38,6 +38,7 @@ HYPERKIT_LIB_SRC := \
 	src/lib/acpitbl.c \
 	src/lib/atkbdc.c \
 	src/lib/block_if.c \
+	src/lib/bootrom.c \
 	src/lib/bhyvegc.c \
 	src/lib/console.c \
 	src/lib/consport.c \
@@ -59,6 +60,7 @@ HYPERKIT_LIB_SRC := \
 	src/lib/pci_uart.c \
 	src/lib/pci_virtio_9p.c \
 	src/lib/pci_virtio_block.c \
+	src/lib/pci_virtio_console.c \
 	src/lib/pci_virtio_net_tap.c \
 	src/lib/pci_virtio_net_vmnet.c \
 	src/lib/pci_virtio_net_vpnkit.c \
@@ -66,6 +68,8 @@ HYPERKIT_LIB_SRC := \
 	src/lib/pci_virtio_sock.c \
 	src/lib/pm.c \
 	src/lib/post.c \
+	src/lib/ps2kbd.c \
+	src/lib/ps2mouse.c \
 	src/lib/rtc.c \
 	src/lib/rfb.c \
 	src/lib/smbiostbl.c \
@@ -77,7 +81,6 @@ HYPERKIT_LIB_SRC := \
 	src/lib/xmsr.c
 
 FIRMWARE_LIB_SRC := \
-	src/lib/firmware/bootrom.c \
 	src/lib/firmware/kexec.c \
 	src/lib/firmware/fbsd.c \
 	src/lib/firmware/multiboot.c

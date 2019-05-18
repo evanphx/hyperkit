@@ -98,7 +98,7 @@ struct mem_seg {
 	void *object;
 };
 
-#define	VM_MAX_MEMORY_SEGMENTS	2
+#define	VM_MAX_MEMORY_SEGMENTS	4
 
 /*
  * Initialization:
@@ -541,8 +541,10 @@ vm_malloc(struct vm *vm, uint64_t gpa, size_t len, uint64_t prot)
 	if (allocated && available == 0)
 		return (0);
 
-	if (vm->num_mem_segs >= VM_MAX_MEMORY_SEGMENTS)
-		return (E2BIG);
+	if (vm->num_mem_segs >= VM_MAX_MEMORY_SEGMENTS) {
+	    fprintf(stderr, "memory segments exhausted: %d >= %d\n", vm->num_mem_segs, VM_MAX_MEMORY_SEGMENTS);
+	    return (E2BIG);
+	}
 
 	seg = &vm->mem_segs[vm->num_mem_segs];
 

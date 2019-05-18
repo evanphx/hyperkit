@@ -56,6 +56,7 @@
 
 #include <xhyve/xhyve.h>
 #include <xhyve/acpi.h>
+#include <xhyve/atkbdc.h>
 #include <xhyve/inout.h>
 #include <xhyve/dbgport.h>
 #include <xhyve/ioapic.h>
@@ -72,7 +73,6 @@
 
 #include <xhyve/firmware/kexec.h>
 #include <xhyve/firmware/fbsd.h>
-#include <xhyve/firmware/bootrom.h>
 #include <xhyve/firmware/multiboot.h>
 
 #ifdef HAVE_OCAML
@@ -150,6 +150,7 @@ usage(int code)
 		"       -m: memory size in MB, may be suffixed with one of K, M, G or T\n"
 		"       -M: print MAC address and exit if using vmnet\n"
 		"       -P: vmexit from the guest on pause\n"
+		"       -p: pin 'vcpu' to 'hostcpu'\n"
 		"       -s: <slot,driver,configinfo> PCI slot config\n"
 		"       -u: RTC keeps UTC time\n"
 		"       -U: uuid\n"
@@ -266,7 +267,11 @@ vcpu_thread(void *param)
 	assert(error == 0);
 
 	if (vcpu == BSP) {
-		rip_entry = fw_func();
+		if (fw_func != NULL) {
+		    rip_entry = fw_func();
+		} else {
+		    rip_entry = 0xFFF0;
+		}
 	} else {
 		rip_entry = vmexit[vcpu].rip;
 		spinup_ap_realmode(vcpu, &rip_entry);
@@ -372,8 +377,8 @@ vmexit_rdmsr(struct vm_exit *vme, int *pvcpu)
 	val = 0;
 	error = emulate_rdmsr(*pvcpu, vme->u.msr.code, &val);
 	if (error != 0) {
-		fprintf(stderr, "rdmsr to register %#x on vcpu %d\n",
-		    vme->u.msr.code, *pvcpu);
+		/* fprintf(stderr, "rdmsr to register %#x on vcpu %d\n", */
+		    /* vme->u.msr.code, *pvcpu); */
 		if (strictmsr) {
 			vm_inject_gp(*pvcpu);
 			return (VMEXIT_CONTINUE);
@@ -398,8 +403,8 @@ vmexit_wrmsr(struct vm_exit *vme, int *pvcpu)
 
 	error = emulate_wrmsr(*pvcpu, vme->u.msr.code, vme->u.msr.wval);
 	if (error != 0) {
-		fprintf(stderr, "wrmsr to register %#x(%#llx) on vcpu %d\n",
-		    vme->u.msr.code, vme->u.msr.wval, *pvcpu);
+		/* fprintf(stderr, "wrmsr to register %#x(%#llx) on vcpu %d\n", */
+		    /* vme->u.msr.code, vme->u.msr.wval, *pvcpu); */
 		if (strictmsr) {
 			vm_inject_gp(*pvcpu);
 			return (VMEXIT_CONTINUE);
@@ -532,10 +537,11 @@ vmexit_suspend(struct vm_exit *vme, int *pvcpu)
 	pthread_mutex_unlock(&resetcpu_mtx);
 
 	switch ((int) (how)) {
-	case VM_SUSPEND_POWEROFF:
-	case VM_SUSPEND_HALT:
-		exit(0);
 	case VM_SUSPEND_RESET:
+		exit(0);
+	case VM_SUSPEND_POWEROFF:
+		exit(1);
+	case VM_SUSPEND_HALT:
 		exit(2);
 	case VM_SUSPEND_TRIPLEFAULT:
 		exit(3);
@@ -740,8 +746,6 @@ firmware_parse(const char *opt) {
 		fw_func = kexec;
 	} else if (strncmp(fw, "fbsd", strlen("fbsd")) == 0) {
 		fw_func = fbsd_load;
-	} else if (strncmp(fw, "bootrom", strlen("bootrom")) == 0) {
-		fw_func = bootrom_load;
 	} else if (strncmp(fw, "multiboot", strlen("multiboot")) == 0) {
 		fw_func = multiboot;
 	} else {
@@ -773,8 +777,6 @@ firmware_parse(const char *opt) {
 	} else if (fw_func == fbsd_load) {
 		/* FIXME: let user set boot-loader serial device */
 		ret = fbsd_init(opt1, opt2, opt3, NULL);
-	} else if (fw_func == bootrom_load) {
-		ret = bootrom_init(opt1);
 	} else if (fw_func == multiboot) {
 		ret = multiboot_init(opt1, opt2, opt3);
 	}
@@ -951,7 +953,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (fw != 1)
+	if (fw != 1 && (lpc_bootrom() == NULL))
 		usage(1);
 
 	/*
@@ -1008,6 +1010,7 @@ main(int argc, char *argv[])
 
 	init_mem();
 	init_inout();
+	atkbdc_init();
 	pci_irq_init();
 	ioapic_init();
 
@@ -1041,10 +1044,6 @@ main(int argc, char *argv[])
 	if (acpi) {
 		error = acpi_build(guest_ncpus);
 		assert(error == 0);
-	}
-
-	if (bootrom()) {
-		fwctl_init();
 	}
 
 	rip = 0;
