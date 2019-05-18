@@ -58,7 +58,7 @@
  *  -s <b>,fbuf,wait,vga=on|io|off,rfb=<ip>:port,w=width,h=height
  */
 
-static int fbuf_debug = 1;
+static int fbuf_debug = 0;
 #define	DEBUG_INFO	1
 #define	DEBUG_VERBOSE	4
 #define	DPRINTF(level, params)  if (level <= fbuf_debug) printf params

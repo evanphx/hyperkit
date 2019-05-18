@@ -38,6 +38,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/ioctl.h>
 
 #include <err.h>
 #include <errno.h>
@@ -51,6 +52,8 @@
 #include <pthread.h>
 #include <libgen.h>
 #include <sysexits.h>
+#include <termios.h>
+#include <signal.h>
 
 #include <xhyve/xhyve.h>
 #include <xhyve/pci_emul.h>
@@ -112,6 +115,13 @@ struct pci_vtcon_sock
 	bool                     vss_open;
 };
 
+struct pci_vtcon_stdio
+{
+	struct pci_vtcon_port *  vss_port;
+	struct mevent *          vss_conn_evp;
+	struct mevent *          vss_winch_evp;
+};
+
 struct pci_vtcon_softc {
 	struct virtio_softc      vsc_vs;
 	struct vqueue_info       vsc_queues[VTCON_MAXQ];
@@ -141,8 +151,8 @@ struct pci_vtcon_control {
 } __attribute__((packed));
 
 struct pci_vtcon_console_resize {
-	uint16_t cols;
 	uint16_t rows;
+	uint16_t cols;
 } __attribute__((packed));
 
 static void pci_vtcon_reset(void *);
@@ -155,10 +165,15 @@ static void pci_vtcon_sock_accept(int, enum ev_type,  void *);
 static void pci_vtcon_sock_rx(int, enum ev_type, void *);
 static void pci_vtcon_sock_tx(struct pci_vtcon_port *, void *, struct iovec *,
     int);
+static void pci_vtcon_stdio_rx(int, enum ev_type, void *);
+static void pci_vtcon_stdio_tx(struct pci_vtcon_port *, void *, struct iovec *,
+    int);
+static void pci_vtcon_stdio_winch(int, enum ev_type, void *);
 static void pci_vtcon_control_send(struct pci_vtcon_softc *,
     struct pci_vtcon_control *, const void *, size_t);
 static void pci_vtcon_announce_port(struct pci_vtcon_port *);
 static void pci_vtcon_open_port(struct pci_vtcon_port *, bool);
+static void pci_vtcon_send_resize(struct pci_vtcon_port *port);
 
 static struct virtio_consts vtcon_vi_consts = {
 	"vtcon",		/* our name */
@@ -337,6 +352,37 @@ out:
 	return (error);
 }
 
+
+static int
+pci_vtcon_stdio_add(struct pci_vtcon_softc *sc, int winch_watcher, bool console)
+{
+	struct pci_vtcon_stdio *sock;
+	int error = 0;
+
+	sock = calloc(1, sizeof(struct pci_vtcon_stdio));
+	if (sock == NULL) {
+		error = -1;
+		goto out;
+	}
+
+	sock->vss_port = pci_vtcon_port_add(sc, "stdio", pci_vtcon_stdio_tx, sock);
+	if (sock->vss_port == NULL) {
+		error = -1;
+		goto out;
+	}
+
+	sock->vss_port->vsp_console = console;
+
+	fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
+	sock->vss_conn_evp = mevent_add(STDIN_FILENO, EVF_READ, pci_vtcon_stdio_rx, sock);
+	sock->vss_winch_evp = mevent_add(winch_watcher, EVF_READ, pci_vtcon_stdio_winch, sock);
+
+	pci_vtcon_open_port(sock->vss_port, true);
+
+out:
+	return (error);
+}
+
 static void
 pci_vtcon_sock_accept(int fd __unused, enum ev_type t __unused, void *arg)
 {
@@ -443,6 +489,77 @@ pci_vtcon_sock_tx(struct pci_vtcon_port *port __unused, void *arg, struct iovec 
 }
 
 static void
+pci_vtcon_stdio_rx(int fd __unused, enum ev_type t __unused, void *arg)
+{
+	struct pci_vtcon_port *port;
+	struct pci_vtcon_stdio *sock = (struct pci_vtcon_stdio *)arg;
+	struct vqueue_info *vq;
+	struct iovec iov;
+	static char dummybuf[2048];
+	int n;
+	uint16_t idx;
+	ssize_t len;
+
+	port = sock->vss_port;
+	vq = pci_vtcon_port_to_vq(port, true);
+
+	if (!port->vsp_rx_ready) {
+		len = read(STDIN_FILENO, dummybuf, sizeof(dummybuf));
+		if (len == 0)
+			goto close;
+
+		return;
+	}
+
+	if (!vq_has_descs(vq)) {
+		len = read(STDIN_FILENO, dummybuf, sizeof(dummybuf));
+
+		vq_endchains(vq, 1);
+		if (len == 0)
+			goto close;
+
+		return;
+	}
+
+	do {
+		n = vq_getchain(vq, &idx, &iov, 1, NULL);
+		len = readv(STDIN_FILENO, &iov, n);
+
+		if (len == 0 || (len < 0 && errno == EWOULDBLOCK)) {
+			vq_retchain(vq);
+			vq_endchains(vq, 0);
+			if (len == 0)
+				goto close;
+
+			return;
+		}
+
+		vq_relchain(vq, idx, (uint32_t)len);
+	} while (vq_has_descs(vq));
+
+	vq_endchains(vq, 1);
+
+close:
+	mevent_delete_close(sock->vss_conn_evp);
+}
+
+static void
+pci_vtcon_stdio_tx(struct pci_vtcon_port *port __unused, void *arg, struct iovec *iov,
+    int niov)
+{
+	struct pci_vtcon_stdio *sock;
+	ssize_t ret = 0;
+
+	sock = (struct pci_vtcon_stdio *)arg;
+
+	ret = writev(STDOUT_FILENO, iov, niov);
+
+	if (ret <= 0) {
+		mevent_delete_close(sock->vss_conn_evp);
+	}
+}
+
+static void
 pci_vtcon_control_tx(struct pci_vtcon_port *port, void *arg __unused, struct iovec *iov,
     int niov)
 {
@@ -483,6 +600,8 @@ pci_vtcon_control_tx(struct pci_vtcon_port *port, void *arg __unused, struct iov
 			resp.id = ctrl->id;
 			resp.value = 1;
 			pci_vtcon_control_send(sc, &resp, NULL, 0);
+
+			pci_vtcon_send_resize(port);
 		}
 		break;
 	}
@@ -539,7 +658,7 @@ pci_vtcon_control_send(struct pci_vtcon_softc *sc,
 
 	memcpy(iov.iov_base, ctrl, sizeof(struct pci_vtcon_control));
 	if (payload != NULL && len > 0)
-		memcpy((struct pci_vtcon_control*)(iov.iov_base) + sizeof(struct pci_vtcon_control),
+		memcpy((struct pci_vtcon_control*)(iov.iov_base) + 1,
 		     payload, len);
 
 	vq_relchain(vq, idx, (uint32_t)(sizeof(struct pci_vtcon_control) + len));
@@ -588,6 +707,93 @@ pci_vtcon_notify_rx(void *vsc, struct vqueue_info *vq)
 	}
 }
 
+static void make_tty_raw(int fd, struct termios* old) {
+    struct termios raw;
+
+    tcgetattr(fd, old);
+
+    raw = *old;
+    cfmakeraw(&raw);
+    tcsetattr(fd, TCSANOW, &raw);
+}
+
+static void reset_tty(int fd, struct termios* orig) {
+    tcsetattr(fd, TCSANOW, orig);
+}
+
+static void get_size(int fd, unsigned short* rows, unsigned short* cols) {
+    struct winsize sz;
+
+    if (ioctl(fd, TIOCGWINSZ, &sz) != -1) {
+	*rows = sz.ws_row;
+	*cols = sz.ws_col;
+    } else {
+	*rows = 25;
+	*cols = 80;
+    }
+}
+
+// Stores the original termios when directing to stdio to reset
+// in at_exit
+static struct termios orig_termios;
+
+static void reset_stdio_termios(void) {
+    reset_tty(STDIN_FILENO, &orig_termios);
+}
+
+// Flaged by SIGWINCH to indicate that we need to send a window change event.
+static bool saw_winch = false;
+static int winch_notify = 0;
+static char* winch_notify_buf = "!";
+
+static void flag_winch(int signum __unused) {
+    saw_winch = true;
+    if (winch_notify > 0) {
+	write(winch_notify, winch_notify_buf, 1);
+    }
+}
+
+static void watch_for_winch(void) {
+    struct sigaction old;
+    struct sigaction winch;
+
+    winch.sa_handler = flag_winch;
+    sigaction(SIGWINCH, &winch, &old);
+}
+
+static void
+pci_vtcon_stdio_winch(int fd, enum ev_type t __unused, void *arg)
+{
+	struct pci_vtcon_stdio *sock = (struct pci_vtcon_stdio *)arg;
+	char buf[2];
+
+	// drain
+	read(fd, buf, 1);
+
+	pci_vtcon_send_resize(sock->vss_port);
+}
+
+static void
+pci_vtcon_send_resize(struct pci_vtcon_port *port)
+{
+	struct pci_vtcon_control event;
+	struct pci_vtcon_console_resize resize;
+	uint16_t rows, cols;
+
+	get_size(STDIN_FILENO, &rows, &cols);
+
+	resize.rows = rows;
+	resize.cols = cols;
+
+	fprintf(stderr, "sigwinch size: rows=%d, cols=%d\n", rows, cols);
+
+	event.id = (uint32_t)port->vsp_id;
+	event.event = VTCON_CONSOLE_RESIZE;
+	event.value = 1;
+	pci_vtcon_control_send(port->vsp_sc, &event, &resize, sizeof(struct pci_vtcon_console_resize));
+}
+
+
 static int
 pci_vtcon_init(struct pci_devinst *pi, char *opts)
 {
@@ -597,12 +803,32 @@ pci_vtcon_init(struct pci_devinst *pi, char *opts)
 	char *opt;
 	int i;
 	bool console = false;
+	bool stdio = false;
+
+	while ((opt = strsep(&opts, ",")) != NULL) {
+	    if (!strcmp(opt, "console")) {
+		console = true;
+	    } if (!strcmp(opt, "stdio")) {
+		stdio = true;
+	    } else {
+		portname = strsep(&opt, "=");
+		portpath = opt;
+	    }
+	}
+
 
 	sc = calloc(1, sizeof(struct pci_vtcon_softc));
 	sc->vsc_config = calloc(1, sizeof(struct pci_vtcon_config));
 	sc->vsc_config->max_nr_ports = VTCON_MAXPORTS;
-	sc->vsc_config->cols = 80;
-	sc->vsc_config->rows = 25; 
+
+	if (stdio) {
+	    get_size(STDIN_FILENO, &sc->vsc_config->rows, &sc->vsc_config->cols);
+	    fprintf(stderr, "size: rows=%d, cols=%d\n", sc->vsc_config->rows, sc->vsc_config->cols);
+	} else {
+	    sc->vsc_config->cols = 80;
+	    sc->vsc_config->rows = 25; 
+	    fprintf(stderr, "using default size\n");
+	}
 
 	vi_softc_linkup(&sc->vsc_vs, &vtcon_vi_consts, sc, pi, sc->vsc_queues);
 	sc->vsc_vs.vs_mtx = &sc->vsc_mtx;
@@ -632,16 +858,24 @@ pci_vtcon_init(struct pci_devinst *pi, char *opts)
 	sc->vsc_control_port.vsp_cb = pci_vtcon_control_tx;
 	sc->vsc_control_port.vsp_enabled = true;
 
-	while ((opt = strsep(&opts, ",")) != NULL) {
-	    if (!strcmp(opt, "console")) {
-		console = true;
-	    } else {
-		portname = strsep(&opt, "=");
-		portpath = opt;
-	    }
-	}
+	if (stdio) {
+	    int fds[2];
 
-	if (portname != NULL) {
+	    if (pipe(fds) != 0) {
+		fprintf(stderr, "unable to create pipe to watch for sigwinch: %s\n", strerror(errno));
+		return (1);
+	    }
+
+	    winch_notify = fds[1];
+
+	    watch_for_winch();
+	    make_tty_raw(STDIN_FILENO, &orig_termios);
+	    if (pci_vtcon_stdio_add(sc, fds[0], console) < 0) {
+		    fprintf(stderr, "cannot create port stdio: %s\n", strerror(errno));
+		    return (1);
+	    }
+	    atexit(reset_stdio_termios);
+	} else if (portname != NULL) {
 	    /* create port */
 	    if (pci_vtcon_sock_add(sc, portname, portpath, console) < 0) {
 		    fprintf(stderr, "cannot create port %s: %s\n",
