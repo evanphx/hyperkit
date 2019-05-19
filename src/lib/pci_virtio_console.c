@@ -552,7 +552,12 @@ pci_vtcon_stdio_tx(struct pci_vtcon_port *port __unused, void *arg, struct iovec
 
 	sock = (struct pci_vtcon_stdio *)arg;
 
-	ret = writev(STDOUT_FILENO, iov, niov);
+	for (int i = 0; i < niov; i++) {
+		ret = stream_write(STDOUT_FILENO, iov[i].iov_base,
+		    (ssize_t)iov[i].iov_len);
+		if (ret <= 0)
+			break;
+	}
 
 	if (ret <= 0) {
 		mevent_delete_close(sock->vss_conn_evp);
@@ -714,6 +719,7 @@ static void make_tty_raw(int fd, struct termios* old) {
 
     raw = *old;
     cfmakeraw(&raw);
+    raw.c_cflag |= CLOCAL;
     tcsetattr(fd, TCSANOW, &raw);
 }
 
