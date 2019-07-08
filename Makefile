@@ -38,6 +38,9 @@ HYPERKIT_LIB_SRC := \
 	src/lib/acpitbl.c \
 	src/lib/atkbdc.c \
 	src/lib/block_if.c \
+	src/lib/bootrom.c \
+	src/lib/bhyvegc.c \
+	src/lib/console.c \
 	src/lib/consport.c \
 	src/lib/dbgport.c \
 	src/lib/fwctl.c \
@@ -50,12 +53,14 @@ HYPERKIT_LIB_SRC := \
 	src/lib/mptbl.c \
 	src/lib/pci_ahci.c \
 	src/lib/pci_emul.c \
+	src/lib/pci_fbuf.c \
 	src/lib/pci_hostbridge.c \
 	src/lib/pci_irq.c \
 	src/lib/pci_lpc.c \
 	src/lib/pci_uart.c \
 	src/lib/pci_virtio_9p.c \
 	src/lib/pci_virtio_block.c \
+	src/lib/pci_virtio_console.c \
 	src/lib/pci_virtio_net_tap.c \
 	src/lib/pci_virtio_net_vmnet.c \
 	src/lib/pci_virtio_net_vpnkit.c \
@@ -63,25 +68,31 @@ HYPERKIT_LIB_SRC := \
 	src/lib/pci_virtio_sock.c \
 	src/lib/pm.c \
 	src/lib/post.c \
+	src/lib/ps2kbd.c \
+	src/lib/ps2mouse.c \
 	src/lib/rtc.c \
+	src/lib/rfb.c \
 	src/lib/smbiostbl.c \
+	src/lib/sockstream.c \
 	src/lib/task_switch.c \
 	src/lib/uart_emul.c \
 	src/lib/virtio.c \
+	src/lib/vga.c \
 	src/lib/xmsr.c
 
 FIRMWARE_LIB_SRC := \
-	src/lib/firmware/bootrom.c \
 	src/lib/firmware/kexec.c \
 	src/lib/firmware/fbsd.c \
 	src/lib/firmware/multiboot.c
 
 HYPERKIT_SRC := src/hyperkit.c
 
-HAVE_OCAML_QCOW := $(shell if ocamlfind query qcow prometheus-app uri logs logs.fmt mirage-unix >/dev/null 2>/dev/null ; then echo YES ; else echo NO; fi)
+CFLAGS += -Icontrib/lib9p -Wno-unused-function
+
+HAVE_OCAML_QCOW := NO # $(shell if ocamlfind query qcow prometheus-app uri logs logs.fmt mirage-unix >/dev/null 2>/dev/null ; then echo YES ; else echo NO; fi)
 
 ifeq ($(HAVE_OCAML_QCOW),YES)
-CFLAGS += -DHAVE_OCAML=1 -DHAVE_OCAML_QCOW=1 -DHAVE_OCAML=1
+CFLAGS += -DHAVE_OCAML=1 -DHAVE_OCAML_QCOW=1 -DHAVE_OCAML=1 
 
 LIBEV_FILE=/usr/local/lib/libev.a
 LIBEV=$(shell if test -e $(LIBEV_FILE) ; then echo $(LIBEV_FILE) ; fi )
@@ -105,7 +116,7 @@ OCAML_C_SRC := \
 	src/lib/mirage_block_c.c
 
 OCAML_WHERE := $(shell ocamlc -where)
-OCAML_PACKS := cstruct cstruct.lwt io-page io-page.unix uri mirage-block \
+OCAML_PACKS := cstruct io-page io-page.unix uri mirage-block \
 	mirage-block-unix qcow unix threads lwt lwt.unix logs logs.fmt   \
 	mirage-unix prometheus-app conduit-lwt cohttp.lwt
 OCAML_LDLIBS := -L $(OCAML_WHERE) \
@@ -139,7 +150,10 @@ INC := -Isrc/include
 
 CFLAGS += -DVERSION=\"$(GIT_VERSION)\" -DVERSION_SHA1=\"$(GIT_VERSION_SHA1)\"
 
-TARGET = build/hyperkit
+LDFLAGS += -Lcontrib/lib9p/build
+LDLIBS += contrib/lib9p/build/lib9p.a -lz
+
+TARGET = build/msl
 
 all: $(TARGET) | build
 

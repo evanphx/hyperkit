@@ -92,3 +92,43 @@ static inline void xpthread_mutex_unlock(pthread_mutex_t *mutex)
 		xhyve_abort("pthread_mutex_unlock failed: %d: %s\n",
 			    rc, strerror(rc));
 }
+
+/*
+ * read_uint16_unaligned, write_uint16_unaligned,
+ * read_uint32_unaligned, write_uint32_unaligned
+ * read_uint64_unaligned, write_uint64_unaligned
+ *
+ * Routines to handle unaligned reads/writes - these are nop on AMD64 but routing
+ * the reads through these bottlenecks silences the warning and provides a place
+ * to put #if code to handle architectures where aligment matters (if it is ever needed).
+ */
+
+static inline uint16_t read_uint16_unaligned(void *pointer) {
+    uint16_t *castPointer = (uint16_t *)pointer;
+    return *castPointer;
+}
+
+static inline void write_uint16_unaligned(void *pointer, uint16_t data) {
+    uint16_t *castPointer = (uint16_t *)pointer;
+    *castPointer = data;
+}
+
+static inline uint32_t read_uint32_unaligned(void *pointer) {
+    uint32_t *castPointer = (uint32_t *)pointer;
+    return *castPointer;
+}
+
+static inline void write_uint32_unaligned(void *pointer, uint32_t data) {
+    uint32_t *castPointer = (uint32_t *)pointer;
+    *castPointer = data;
+}
+
+static inline uint64_t read_uint64_unaligned(void *pointer) {
+    uint64_t *castPointer = (uint64_t *)pointer;
+    return *castPointer;
+}
+
+static inline void write_uint64_unaligned(void *pointer, uint64_t data) {
+    uint64_t *castPointer = (uint64_t *)pointer;
+    *castPointer = data;
+}

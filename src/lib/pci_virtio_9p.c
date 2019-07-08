@@ -18,15 +18,24 @@
 #include <xhyve/pci_emul.h>
 #include <xhyve/virtio.h>
 
+#include <lib9p.h>
+#include <backend/fs.h>
+
 #define VIRTIO_9P_MOUNT_TAG 1
 
 static int pci_vt9p_debug = 0;
 #define DPRINTF(params) if (pci_vt9p_debug) printf params
+#define WPRINTF(params) printf params
 
 /* XXX issues with larger buffers elsewhere in stack */
 #define BUFSIZE (1 << 18)
 #define MAXDESC (BUFSIZE / 4096 + 4)
-#define VT9P_RINGSZ (BUFSIZE / 4096 * 4)
+// #define VT9P_RINGSZ (BUFSIZE / 4096 * 4)
+
+#define	VT9P_MAX_IOV	128
+#define VT9P_RINGSZ	256
+#define	VT9P_MAXTAGSZ	256
+#define	VT9P_CONFIGSPACESZ	(VT9P_MAXTAGSZ + sizeof(uint16_t))
 
 struct virtio_9p_config {
 	uint16_t tag_len;
@@ -56,24 +65,53 @@ struct pci_vt9p_softc {
 	int v9sc_inflight;
 	int port;
 	char *path;
+
+	struct vqueue_info       vsc_vq;
+	pthread_mutex_t          vsc_mtx;
+	uint64_t                 vsc_cfg;
+	uint64_t                 vsc_features;
+	char *                   vsc_rootpath;
+	struct virtio_9p_config * vsc_config;
+	struct l9p_backend *     vsc_fs_backend;
+	struct l9p_server *      vsc_server;
+  struct l9p_connection *  vsc_conn;
 };
 
+struct pci_vt9p_request {
+	struct pci_vt9p_softc *	vsr_sc;
+	struct iovec *		vsr_iov;
+	size_t			vsr_niov;
+	size_t			vsr_respidx;
+	size_t			vsr_iolen;
+	uint16_t		vsr_idx;
+};
+
+static int pci_vt9p_init_local(struct pci_devinst *pi, char *opts);
 static void pci_vt9p_reset(void *);
 static void pci_vt9p_notify(void *, struct vqueue_info *);
+static void pci_vt9p_notify_local(void *, struct vqueue_info *);
 static int pci_vt9p_cfgread(void *, int, int, uint32_t *);
 static int pci_vt9p_cfgwrite(void *, int, int, uint32_t);
 static void pci_vt9p_lazy_initialise_socket(struct pci_vt9p_softc *sc);
 static void *pci_vt9p_thread(void *vsc);
+
+static void
+pci_vt9p_neg_features(void *vsc, uint64_t negotiated_features)
+{
+	struct pci_vt9p_softc *sc = vsc;
+
+	sc->vsc_features = negotiated_features;
+}
 
 static struct virtio_consts vt9p_vi_consts = {
 	"vt9p", /* our name */
 	1, /* we support 1 virtqueue */
 	0, /* config reg size */
 	pci_vt9p_reset, /* reset */
-	pci_vt9p_notify, /* device-wide qnotify */
+	pci_vt9p_notify_local, /* device-wide qnotify */
 	pci_vt9p_cfgread, /* read virtio config */
 	pci_vt9p_cfgwrite, /* write virtio config */
-	NULL, /* apply negotiated features */
+	pci_vt9p_neg_features, /* apply negotiated features */
 	VIRTIO_9P_MOUNT_TAG, /* our capabilities */
 };
 
@@ -437,8 +475,9 @@ copy_up_to_comma(const char *from)
 }
 
 static int
-pci_vt9p_init(struct pci_devinst *pi, char *opts)
+pci_vt9p_init_old(struct pci_devinst *pi, char *opts)
 {
+
 	struct pci_vt9p_softc *sc;
 
 	int port = -1; /* if != -1, the port is valid. path is valid otherwise */
@@ -526,14 +565,195 @@ pci_vt9p_cfgwrite(UNUSED void *vsc, int offset, UNUSED int size,
 static int
 pci_vt9p_cfgread(void *vsc, int offset, int size, uint32_t *retval)
 {
+  /*
+	struct pci_vt9p_softc *sc = vsc;
+	void *ptr;
+
+	ptr = (uint8_t *)&sc->v9sc_cfg + offset;
+	DPRINTF(("vt9p: read to reg %d\n\r", offset));
+	memcpy(retval, ptr, size);
+
+	return 0;
+	*/
 	struct pci_vt9p_softc *sc = vsc;
 	void *ptr;
 
 	DPRINTF(("vt9p: read to reg %d\n\r", offset));
-	ptr = (uint8_t *)&sc->v9sc_cfg + offset;
+	ptr = (uint8_t *)sc->vsc_config + offset;
 	memcpy(retval, ptr, size);
+	return (0);
+}
 
-	return 0;
+static void
+pci_vt9p_notify_local(void *vsc, struct vqueue_info *vq)
+{
+	struct iovec iov[VT9P_MAX_IOV];
+	struct pci_vt9p_softc *sc;
+	struct pci_vt9p_request *preq;
+	uint16_t idx;
+	uint16_t flags[VT9P_MAX_IOV];
+	int n;
+
+	sc = vsc;
+
+	while (vq_has_descs(vq)) {
+		n = vq_getchain(vq, &idx, iov, VT9P_MAX_IOV, flags);
+		preq = calloc(1, sizeof(struct pci_vt9p_request));
+		preq->vsr_sc = sc;
+		preq->vsr_idx = idx;
+		preq->vsr_iov = iov;
+		preq->vsr_niov = (size_t)n;
+		preq->vsr_respidx = 0;
+
+		/* Count readable descriptors */
+		for (int i = 0; i < n; i++) {
+			if (flags[i] & VRING_DESC_F_WRITE)
+				break;
+
+			preq->vsr_respidx++;
+		}
+
+		for (int i = 0; i < n; i++) {
+			DPRINTF(("vt9p: vt9p_notify(): desc%d base=%p, "
+			    "len=%zu, flags=0x%04x\r\n", i, iov[i].iov_base,
+			    iov[i].iov_len, flags[i]));
+		}
+
+		l9p_connection_recv(sc->vsc_conn, iov, preq->vsr_respidx, preq);
+	}
+}
+
+static int
+pci_vt9p_get_buffer(struct l9p_request *req, struct iovec *iov, size_t *niov,
+    void *arg)
+{
+	(void)arg;
+	struct pci_vt9p_request *preq = req->lr_aux;
+	size_t n = preq->vsr_niov - preq->vsr_respidx;
+	
+	memcpy(iov, preq->vsr_iov + preq->vsr_respidx,
+	    n * sizeof(struct iovec));
+	*niov = n;
+	return (0);
+}
+
+
+static int
+pci_vt9p_send(struct l9p_request *req, const struct iovec *iov,
+    const size_t niov, const size_t iolen, void *arg)
+{
+	(void)iov;
+	(void)niov;
+	(void)arg;
+
+	struct pci_vt9p_request *preq = req->lr_aux;
+	struct pci_vt9p_softc *sc = preq->vsr_sc;
+
+	preq->vsr_iolen = iolen;
+
+	pthread_mutex_lock(&sc->vsc_mtx);
+	vq_relchain(&sc->vsc_vq, preq->vsr_idx, (uint32_t)preq->vsr_iolen);
+	vq_endchains(&sc->vsc_vq, 1);
+	pthread_mutex_unlock(&sc->vsc_mtx);
+	free(preq);
+	return (0);
+}
+
+static void
+pci_vt9p_drop(struct l9p_request *req, const struct iovec *iov, size_t niov,
+    void *arg)
+{
+	(void)iov;
+	(void)niov;
+	(void)arg;
+	struct pci_vt9p_request *preq = req->lr_aux;
+	struct pci_vt9p_softc *sc = preq->vsr_sc;
+
+	pthread_mutex_lock(&sc->vsc_mtx);
+	vq_relchain(&sc->vsc_vq, preq->vsr_idx, 0);
+	vq_endchains(&sc->vsc_vq, 1);
+	pthread_mutex_unlock(&sc->vsc_mtx);
+	free(preq);
+}
+
+static int
+pci_vt9p_init(struct pci_devinst *pi, char *opts) {
+	struct pci_vt9p_softc *sc;
+	char *opt;
+	char *sharename = NULL;
+	char *rootpath = NULL;
+	int rootfd;
+
+	if (opts == NULL) {
+		printf("virtio-9p: share name and path required\n");
+		return (1);
+	}
+
+	DPRINTF(("initializing virtio-9p...\n"));
+
+	sc = calloc(1, sizeof(struct pci_vt9p_softc));
+	sc->vsc_config = calloc(1, sizeof(struct virtio_9p_config) +
+	    VT9P_MAXTAGSZ);
+
+	pthread_mutex_init(&sc->vsc_mtx, NULL);
+
+	while ((opt = strsep(&opts, ",")) != NULL) {
+		if (sharename == NULL) {
+			sharename = strsep(&opt, "=");
+			rootpath = strdup(opt);
+			continue;
+		}
+
+		if (strcmp(opt, "ro") == 0)
+			DPRINTF(("read-only mount requested\r\n"));
+	}
+
+	DPRINTF(("configured share=%s path=%s\n", sharename, rootpath));
+	rootfd = open(rootpath, O_DIRECTORY);
+	if (rootfd < 0)
+		return (-1);
+
+	sc->vsc_config->tag_len = (uint16_t)strlen(sharename);
+	strncpy((char*)(sc->vsc_config->tag), sharename, strlen(sharename));
+	
+	if (l9p_backend_fs_init(&sc->vsc_fs_backend, rootfd) != 0) {
+		errno = ENXIO;
+		return (1);
+	}
+
+	if (l9p_server_init(&sc->vsc_server, sc->vsc_fs_backend) != 0) {
+		errno = ENXIO;
+		return (1);
+	}
+
+	if (l9p_connection_init(sc->vsc_server, &sc->vsc_conn) != 0) {
+		errno = EIO;
+		return (1);
+	}
+
+	DPRINTF(("l9p initialized, configuring pci device\n"));
+
+	sc->vsc_conn->lc_msize = L9P_MAX_IOV * 4096; // PAGE_SIZE;
+	sc->vsc_conn->lc_lt.lt_get_response_buffer = pci_vt9p_get_buffer;
+	sc->vsc_conn->lc_lt.lt_send_response = pci_vt9p_send;
+	sc->vsc_conn->lc_lt.lt_drop_response = pci_vt9p_drop;
+
+	vi_softc_linkup(&sc->v9sc_vs, &vt9p_vi_consts, sc, pi, &sc->vsc_vq);
+	sc->v9sc_vs.vs_mtx = &sc->vsc_mtx;
+	sc->vsc_vq.vq_qsize = VT9P_RINGSZ;
+
+	/* initialize config space */
+	pci_set_cfgdata16(pi, PCIR_DEVICE, VIRTIO_DEV_9P);
+	pci_set_cfgdata16(pi, PCIR_VENDOR, VIRTIO_VENDOR);
+	pci_set_cfgdata8(pi, PCIR_CLASS, PCIC_STORAGE);
+	pci_set_cfgdata16(pi, PCIR_SUBDEV_0, VIRTIO_TYPE_9P);
+	pci_set_cfgdata16(pi, PCIR_SUBVEND_0, VIRTIO_VENDOR);
+
+	if (vi_intr_init(&sc->v9sc_vs, 1, fbsdrun_virtio_msix()))
+		return (1);
+	vi_set_io_bar(&sc->v9sc_vs, 0);
+
+	return (0);
 }
 
 

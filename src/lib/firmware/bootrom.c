@@ -105,7 +105,7 @@ uint64_t bootrom_load(void)
 	gpa = bootrom_gpa -= (size_t)sbuf.st_size;
 
 	/* XXX Mapping cold be R/O to guest */
-	ptr = vmm_mem_alloc(gpa, (size_t)sbuf.st_size);
+	ptr = vmm_mem_alloc(gpa, (size_t)sbuf.st_size, XHYVE_PROT_READ | XHYVE_PROT_WRITE | XHYVE_PROT_EXECUTE);
 	if (!ptr) {
 		fprintf(stderr,
 			"Failed to allocate %lld bytes of memory for bootrom\n",

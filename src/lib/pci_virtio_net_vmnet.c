@@ -307,7 +307,11 @@ vmn_read(struct vmnet_state *vms, struct iovec *iov, int n) {
 		v.vm_pkt_size += iov[i].iov_len;
 	}
 
-	assert(v.vm_pkt_size >= vms->max_packet_size);
+	if(v.vm_pkt_size < vms->max_packet_size) {
+		// fprintf(stderr, "assert: packet larger than max! %ld < %d\n", v.vm_pkt_size, vms->max_packet_size);
+		return 0;
+		/* assert(v.vm_pkt_size >= vms->max_packet_size); */
+	}
 
 	v.vm_pkt_iov = iov;
 	v.vm_pkt_iovcnt = (uint32_t) n;
@@ -521,6 +525,7 @@ pci_vtnet_tap_rx(struct pci_vtnet_softc *sc)
 		 * Get a pointer to the rx header, and use the
 		 * data immediately following it for the packet buffer.
 		 */
+		/* fprintf(stderr, "packet buffer recieved: %ld (%d)\n", iov[1].iov_len, sc->rx_vhdrlen); */
 		vrx = iov[0].iov_base;
 		riov = rx_iov_trim(iov, &n, sc->rx_vhdrlen);
 

@@ -69,16 +69,19 @@
 #define RSDT_OFFSET		0x040
 #define XSDT_OFFSET		0x080
 #define MADT_OFFSET		0x100
-#define FADT_OFFSET		0x600
-#define HPET_OFFSET		0x740
-#define MCFG_OFFSET		0x780
-#define FACS_OFFSET		0x7C0
-#define DSDT_OFFSET		0x800
+
+#define FADT_OFFSET 0x200
+#define HPET_OFFSET 0x340
+#define MCFG_OFFSET 0x380
+#define FACS_OFFSET 0x3C0
+#define DSDT_OFFSET 0x400
 
 /* Sanity check for MADT size */
+/*
 #if (44 + 38 + 8 * VM_MAXCPU) > (FADT_OFFSET - MADT_OFFSET)
 #error "MADT space insufficient for configured max number of CPUs"
 #endif
+*/
 
 /* ACPI table base in guest memory */
 static void *tb;
@@ -373,7 +376,7 @@ acpitbl_build_madt(void)
 	memcpy(madt_head, madt_head_tmpl, 44);
 
 	for (i = 0; i < acpi_ncpu; i++) {
-		madt_apic = (char *)tb + MADT_OFFSET + 44 + (8 * i);
+		madt_apic = (void*)(((uintptr_t) tb) + ((size_t) ((MADT_OFFSET + 44) + (8 * i))));
 		/* copy MADT APIC template to guest memory */
 		memcpy(madt_apic, madt_apic_tmpl, 8);
 		/* fixup table */
@@ -381,7 +384,7 @@ acpitbl_build_madt(void)
 		acpitbl_write8(madt_apic, 0x3, (uint8_t)i);
 	}
 
-	madt_tail = (char *)tb + MADT_OFFSET + 44 + (8 * acpi_ncpu);
+	madt_tail = (void*)(((uintptr_t) tb) + ((size_t) ((MADT_OFFSET + 44) + (8 * acpi_ncpu))));
 	/* copy MADT tail template to guest memory */
 	memcpy(madt_tail, madt_tail_tmpl, 38);
 	/* fixup table */
