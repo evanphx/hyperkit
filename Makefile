@@ -153,7 +153,7 @@ CFLAGS += -DVERSION=\"$(GIT_VERSION)\" -DVERSION_SHA1=\"$(GIT_VERSION_SHA1)\"
 LDFLAGS += -Lcontrib/lib9p/build
 LDLIBS += contrib/lib9p/build/lib9p.a -lz
 
-TARGET = build/hyperkit
+TARGET = build/msl
 
 all: $(TARGET) | build
 
