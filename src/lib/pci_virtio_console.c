@@ -791,8 +791,6 @@ pci_vtcon_send_resize(struct pci_vtcon_port *port)
 	resize.rows = rows;
 	resize.cols = cols;
 
-	fprintf(stderr, "sigwinch size: rows=%d, cols=%d\n", rows, cols);
-
 	event.id = (uint32_t)port->vsp_id;
 	event.event = VTCON_CONSOLE_RESIZE;
 	event.value = 1;
@@ -829,11 +827,9 @@ pci_vtcon_init(struct pci_devinst *pi, char *opts)
 
 	if (stdio) {
 	    get_size(STDIN_FILENO, &sc->vsc_config->rows, &sc->vsc_config->cols);
-	    fprintf(stderr, "size: rows=%d, cols=%d\n", sc->vsc_config->rows, sc->vsc_config->cols);
 	} else {
 	    sc->vsc_config->cols = 80;
 	    sc->vsc_config->rows = 25; 
-	    fprintf(stderr, "using default size\n");
 	}
 
 	vi_softc_linkup(&sc->vsc_vs, &vtcon_vi_consts, sc, pi, sc->vsc_queues);
