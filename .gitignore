@@ -5,3 +5,4 @@
 /test/initrd
 /test/initrd.gz
 /test/disk.qcow2
+/tmp
