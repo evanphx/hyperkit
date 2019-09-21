@@ -41,6 +41,7 @@
 #include <sys/un.h>
 #include <sys/time.h>
 #include <sys/queue.h>
+#include <sys/stat.h>
 
 #include <stdio.h>
 #include <stdint.h>
@@ -2127,6 +2128,16 @@ static int listen_un(struct sockaddr_un *un)
 	if (rc < 0) {
 		perror("Failed to listen() unix socket");
 		return -1;
+	}
+
+	if (geteuid() == 0 && getegid() == 0) {
+		if (chown(un->sun_path, getuid(), getgid()) == -1) {
+			perror("Changing ownership of socket");
+		}
+
+		if (chmod(un->sun_path, 0660) == -1) {
+			perror("Changing mode of socket");
+		}
 	}
 
 	/* XXX Any chown/chmod needed? */
