@@ -1051,21 +1051,30 @@ main(int argc, char *argv[])
 	// Use GCD to register signal handlers. These are not reentrant, so can call xhyve directly
 	dispatch_source_t sigusr1_source = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, SIGUSR1, 0, dispatch_get_global_queue(0, 0));
 	dispatch_source_t sigusr2_source = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, SIGUSR2, 0, dispatch_get_global_queue(0, 0));
+	dispatch_source_t sigint_source = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, SIGINT, 0, dispatch_get_global_queue(0, 0));
 
 	dispatch_source_set_event_handler(sigusr1_source, ^{
 			fprintf(stdout, "received sigusr1, pausing\n");
 			xh_hv_pause(1);
 		});
+
 	dispatch_source_set_event_handler(sigusr2_source, ^{
 			fprintf(stdout, "received sigusr2, unpausing\n");
 			xh_hv_pause(0);
 		});
 
+	dispatch_source_set_event_handler(sigint_source, ^{
+			fprintf(stdout, "received sigint, pushing power button\n");
+			push_power_button();
+		});
+
 	signal(SIGUSR1, SIG_IGN);
 	signal(SIGUSR2, SIG_IGN);
+	signal(SIGINT, SIG_IGN);
 
 	dispatch_resume(sigusr1_source);
 	dispatch_resume(sigusr2_source);
+	dispatch_resume(sigint_source);
 
 	vcpu_add(BSP, BSP, rip);
 
